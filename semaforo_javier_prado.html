@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semáforo en la Av. Javier Prado: tiempos fijos, reflejo y A*</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,500..800&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --asfalto:#2b3340; --papel:#f3f5f7; --tarjeta:#ffffff; --tinta:#1c232d; --suave:#5d6877; --borde:#d5dbe2;
+  --verde:#1f9d55; --ambar:#d98a00; --rojo:#c93a3a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papel);color:var(--tinta);font:400 15px/1.5 'Figtree',system-ui,sans-serif}
+h1,h2{font-family:'Archivo','Arial Narrow',sans-serif;font-stretch:90%;margin:0}
+header{background:var(--asfalto);color:#fff;padding:22px 28px}
+header h1{font-size:26px;font-weight:700}
+header p{margin:4px 0 0;color:#b9c2cf;max-width:70ch}
+main{max-width:1120px;margin:0 auto;padding:22px 20px 40px;display:grid;grid-template-columns:minmax(0,520px) 1fr;gap:22px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.caja{background:var(--tarjeta);border:1px solid var(--borde);border-radius:10px;padding:16px}
+h2{font-size:17px;font-weight:700;margin-bottom:10px}
+canvas{width:100%;height:auto;display:block;border-radius:6px;background:#8a9a8c}
+.datos{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.dato{background:var(--papel);border-radius:6px;padding:8px 10px}
+.dato b{display:block;font:700 19px 'Archivo',sans-serif}
+.dato span{font-size:12px;color:var(--suave)}
+label{display:block;font-size:13px;color:var(--suave);margin:10px 0 3px}
+select,input[type=range]{width:100%}
+select{padding:7px;border:1px solid var(--borde);border-radius:6px;font:inherit;background:#fff}
+.par{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.val{color:var(--tinta);font-weight:600}
+.botones{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+button{font:600 14px 'Figtree',sans-serif;padding:9px 14px;border-radius:6px;border:1px solid var(--asfalto);background:#fff;color:var(--asfalto);cursor:pointer}
+button.fuerte{background:var(--asfalto);color:#fff}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--ambar);outline-offset:2px}
+button:disabled{opacity:.5;cursor:wait}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 6px;text-align:right;border-bottom:1px solid var(--borde)}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--suave);font-size:13px}
+tr.mejor td{background:#e8f5ec}
+.nota{font-size:13px;color:var(--suave);margin:10px 0 0}
+.ancho{grid-column:1/-1}
+#progreso{height:6px;background:var(--borde);border-radius:3px;margin-top:10px;overflow:hidden}
+#progreso i{display:block;height:100%;width:0;background:var(--verde)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Semáforo en un cruce crítico de la Av. Javier Prado</h1>
+  <p>Simulador de dos ejes en hora punta. Compara el semáforo de tiempos fijos con un agente reflejo con estado y con una planificación A*, usando las mismas llegadas.</p>
+</header>
+
+<main>
+  <section class="caja">
+    <h2>Cruce en vivo</h2>
+    <canvas id="lienzo" width="520" height="440" aria-label="Vista del cruce con colas y semáforos"></canvas>
+    <div class="datos">
+      <div class="dato"><b id="dT">0 s</b><span>tiempo</span></div>
+      <div class="dato"><b id="dFase">NS</b><span>fase en verde</span></div>
+      <div class="dato"><b id="dEspera">0,0 s</b><span>espera media</span></div>
+      <div class="dato"><b id="dCola">0</b><span>cola máxima</span></div>
+    </div>
+  </section>
+
+  <section class="caja">
+    <h2>Parámetros</h2>
+    <div class="par">
+      <div><label for="selEsc">Escenario</label>
+        <select id="selEsc">
+          <option value="valle">Valle (0,08 / 0,08)</option>
+          <option value="simetrica">Punta simétrica (0,20 / 0,20)</option>
+          <option value="asimetrica" selected>Punta asimétrica (0,26 / 0,10)</option>
+        </select></div>
+      <div><label for="selModo">Modo (vista en vivo)</label>
+        <select id="selModo">
+          <option value="base">Tiempos fijos 30/30</option>
+          <option value="reflejo">Reflejo con estado</option>
+          <option value="astar">Búsqueda A*</option>
+        </select></div>
+    </div>
+    <div class="par">
+      <div><label for="vmin">Verde mínimo: <span class="val" id="oVmin">10</span> s</label>
+        <input id="vmin" type="range" min="10" max="20" value="10"></div>
+      <div><label for="vmax">Verde máximo: <span class="val" id="oVmax">60</span> s</label>
+        <input id="vmax" type="range" min="30" max="90" step="5" value="60"></div>
+      <div><label for="kk">K (histéresis): <span class="val" id="oK">1,2</span></label>
+        <input id="kk" type="range" min="1" max="2" step="0.1" value="1.2"></div>
+      <div><label for="hor">Horizonte de A*: <span class="val" id="oHor">40</span> s</label>
+        <input id="hor" type="range" min="20" max="60" step="5" value="40"></div>
+    </div>
+    <label for="vel">Velocidad de la vista: <span class="val" id="oVel">20</span> pasos por segundo</label>
+    <input id="vel" type="range" min="2" max="120" value="20">
+    <div class="botones">
+      <button class="fuerte" id="bPlay">Iniciar</button>
+      <button id="bReset">Reiniciar</button>
+      <button id="bComp">Correr 30 semillas en los 3 modos</button>
+    </div>
+    <div id="progreso"><i></i></div>
+    <p class="nota">La vista en vivo usa la semilla 1. El verde mínimo se aplica a todos los modos.</p>
+  </section>
+
+  <section class="caja ancho">
+    <h2>Comparación del escenario elegido</h2>
+    <table>
+      <thead><tr><th>Modo</th><th>Espera media (s)</th><th>Cola máx. (veh)</th><th>Cómputo/decisión (ms)</th><th>Mejora vs. base</th><th>Gana al base en</th></tr></thead>
+      <tbody id="cuerpo"><tr><td colspan="6" style="text-align:left;color:var(--suave)">Pulsa «Correr 30 semillas» para llenar la tabla.</td></tr></tbody>
+    </table>
+    <p class="nota" id="notaNodos"></p>
+  </section>
+</main>
+
+<script>
+// ---------- Constantes del modelo ----------
+const ESC = { valle:[0.08,0.08], simetrica:[0.20,0.20], asimetrica:[0.26,0.10] };
+const NOMBRE = { base:'Tiempos fijos 30/30', reflejo:'Reflejo con estado', astar:'Búsqueda A*' };
+const FLUJO = 0.5;      // vehículos por segundo en verde
+const PERDIDO = 4;      // segundos perdidos por cambio de fase
+const DURACION = 3600;  // segundos por corrida
+const APROX = [0,0,1,1]; // aproximaciones N,S -> fase 0; E,O -> fase 1
+
+// ---------- Números aleatorios con semilla ----------
+function crearRng(semilla){
+  let a = semilla >>> 0;
+  return function(){
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function poisson(lambda, rnd){
+  const L = Math.exp(-lambda);
+  let k = 0, p = 1;
+  do { k++; p *= rnd(); } while (p > L);
+  return k - 1;
+}
+
+// ---------- Simulación ----------
+function crearSim(esc, semilla, modo, P){
+  const [ns, eo] = ESC[esc];
+  return {
+    t:0, fase:0, tFase:0, perdido:0, destino:0, proxPlan:0,
+    colas:[[],[],[],[]], cred:[0,0,0,0], hist:[[],[],[],[]],
+    lam:[ns,ns,eo,eo], rnd:crearRng(semilla), modo, P,
+    sumaEspera:0, salidas:0, colaMax:0, cambios:0,
+    msDecision:0, decisiones:0, nodos:0, planes:0
+  };
+}
+function tasa(s,a){
+  const h = s.hist[a];
+  return h.length ? h.reduce((x,y)=>x+y,0)/h.length : 0;
+}
+function presion(s,f){
+  const ap = f===0 ? [0,1] : [2,3];
+  return ap.reduce((acc,a)=> acc + s.colas[a].length + 60*tasa(s,a), 0);
+}
+
+// Devuelve true si hay que cambiar de fase
+function decidir(s){
+  const P = s.P;
+  if (s.tFase < P.vmin) return false;
+  if (s.modo === 'base') return s.tFase >= 30;
+  if (s.tFase >= P.vmax) return true;
+  return presion(s,1-s.fase) > P.K * presion(s,s.fase);
+}
+
+function paso(s){
+  // llegadas del segundo
+  for (let a=0;a<4;a++){
+    const n = poisson(s.lam[a], s.rnd);
+    for (let i=0;i<n;i++) s.colas[a].push(s.t);
+    s.hist[a].push(n);
+    if (s.hist[a].length > 60) s.hist[a].shift();
+    if (s.colas[a].length > s.colaMax) s.colaMax = s.colas[a].length;
+  }
+  if (s.perdido > 0){
+    s.perdido--;
+    if (s.perdido === 0){ s.fase = s.destino; s.tFase = 0; }
+  } else {
+    let cambiar;
+    if (s.modo === 'astar'){
+      cambiar = false;
+      if (s.t >= s.proxPlan){ cambiar = planificar(s); s.proxPlan = s.t + 5; }
+    } else {
+      const t0 = performance.now();
+      cambiar = decidir(s);
+      s.msDecision += performance.now() - t0; s.decisiones++;
+    }
+    if (cambiar){
+      s.perdido = PERDIDO - 1; s.destino = 1 - s.fase; s.cambios++;
+    } else {
+      for (let a=0;a<4;a++){
+        if (APROX[a] !== s.fase) continue;
+        s.cred[a] += FLUJO;
+        while (s.cred[a] >= 1 && s.colas[a].length){
+          s.sumaEspera += s.t - s.colas[a].shift();
+          s.salidas++; s.cred[a]--;
+        }
+        if (!s.colas[a].length) s.cred[a] = 0;
+      }
+      s.tFase++;
+    }
+  }
+  s.t++;
+}
+function esperaMedia(s){
+  let suma = s.sumaEspera, n = s.salidas;
+  for (const c of s.colas) for (const llegada of c){ suma += s.t - llegada; n++; }
+  return n ? suma/n : 0;
+}
+
+// ---------- A* con horizonte deslizante ----------
+class Monticulo{
+  constructor(){ this.v = []; }
+  get largo(){ return this.v.length; }
+  push(x){
+    const v = this.v; v.push(x);
+    let i = v.length-1;
+    while (i>0){ const p=(i-1)>>1; if (v[p].f<=v[i].f) break; [v[p],v[i]]=[v[i],v[p]]; i=p; }
+  }
+  pop(){
+    const v = this.v, tope = v[0], ult = v.pop();
+    if (v.length){
+      v[0] = ult; let i = 0;
+      for(;;){
+        let m=i, l=2*i+1, r=l+1;
+        if (l<v.length && v[l].f<v[m].f) m=l;
+        if (r<v.length && v[r].f<v[m].f) m=r;
+        if (m===i) break; [v[m],v[i]]=[v[i],v[m]]; i=m;
+      }
+    }
+    return tope;
+  }
+}
+// h: cada vehículo en cola sale a flujo de saturación, con verde permanente y sin nuevas llegadas
+function heuristica(q, restante){
+  let h = 0;
+  for (const cola of q){
+    const n = Math.floor(cola);
+    for (let k=1;k<=n;k++) h += Math.min(k/FLUJO, restante);
+  }
+  return h;
+}
+function avanzar(n, accion, lam, vmin){
+  if (accion === 1 && n.tF < vmin) return null;
+  const q = n.q.slice();
+  let fase = n.fase, tF = n.tF, verde = 5;
+  if (accion === 0){ tF += 5; }
+  else { fase = 1 - fase; tF = 1; verde = 1; }
+  for (let a=0;a<4;a++){
+    const sale = APROX[a]===fase ? FLUJO*verde : 0;
+    q[a] = Math.max(0, q[a] + lam[a]*5 - sale);
+  }
+  const g = n.g + 5 * (q[0]+q[1]+q[2]+q[3]);
+  return { d:n.d+1, fase, tF, q, g, f:0, primera: n.primera===null ? accion : n.primera };
+}
+function planificar(s){
+  const t0 = performance.now();
+  const H = Math.round(s.P.hor/5);
+  const lam = [0,1,2,3].map(a => tasa(s,a));
+  const raiz = { d:0, fase:s.fase, tF:s.tFase, q:s.colas.map(c=>c.length), g:0, f:0, primera:null };
+  const abierta = new Monticulo(); abierta.push(raiz);
+  let nodos = 0, decision = 0;
+  while (abierta.largo){
+    const n = abierta.pop(); nodos++;
+    if (n.d >= H || nodos > 3000){ decision = n.primera || 0; break; }
+    for (const a of [0,1]){
+      const hijo = avanzar(n, a, lam, s.P.vmin);
+      if (!hijo) continue;
+      hijo.f = hijo.g + heuristica(hijo.q, (H-hijo.d)*5);
+      abierta.push(hijo);
+    }
+  }
+  s.nodos += nodos; s.planes++;
+  s.msDecision += performance.now() - t0; s.decisiones++;
+  return decision === 1;
+}
+
+// ---------- Lectura de parámetros ----------
+const $ = id => document.getElementById(id);
+function parametros(){
+  return { vmin:+$('vmin').value, vmax:+$('vmax').value, K:+$('kk').value, hor:+$('hor').value };
+}
+const coma = x => x.toFixed(1).replace('.',',');
+['vmin','vmax','kk','hor','vel'].forEach(id=>{
+  $(id).addEventListener('input',()=>{
+    $({vmin:'oVmin',vmax:'oVmax',kk:'oK',hor:'oHor',vel:'oVel'}[id]).textContent =
+      id==='kk' ? coma(+$(id).value) : $(id).value;
+  });
+});
+
+// ---------- Vista en vivo ----------
+const lienzo = $('lienzo'), g = lienzo.getContext('2d');
+let sim = null, corriendo = false, ultimo = 0, acumulado = 0;
+
+function reiniciar(){
+  sim = crearSim($('selEsc').value, 1, $('selModo').value, parametros());
+  dibujar();
+}
+function dibujar(){
+  const W = lienzo.width, H = lienzo.height, cx = W/2, cy = H/2, ancho = 70;
+  g.clearRect(0,0,W,H);
+  g.fillStyle = '#8a9a8c'; g.fillRect(0,0,W,H);
+  g.fillStyle = '#2b3340';
+  g.fillRect(cx-ancho/2,0,ancho,H); g.fillRect(0,cy-ancho/2,W,ancho);
+  g.strokeStyle = '#e8ecf0'; g.setLineDash([10,10]); g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx,0); g.lineTo(cx,cy-ancho/2); g.moveTo(cx,cy+ancho/2); g.lineTo(cx,H);
+  g.moveTo(0,cy); g.lineTo(cx-ancho/2,cy); g.moveTo(cx+ancho/2,cy); g.lineTo(W,cy); g.stroke();
+  g.setLineDash([]);
+  const enRojo = sim.perdido > 0;
+  const color = f => enRojo ? (f===sim.fase ? '#d98a00' : '#c93a3a') : (f===sim.fase ? '#1f9d55' : '#c93a3a');
+  const MAXV = 12, L = 17, sep = 4;
+  // aproximaciones: 0 norte, 1 sur, 2 este, 3 oeste
+  const pos = [
+    {x:cx-ancho/4-7,  y:cy-ancho/2-L, dx:0, dy:-1, sx:cx-ancho/2-16, sy:cy-ancho/2-16},
+    {x:cx+ancho/4-7,  y:cy+ancho/2,   dx:0, dy:1,  sx:cx+ancho/2+4,  sy:cy+ancho/2+4},
+    {x:cx+ancho/2,    y:cy-ancho/4-7, dx:1, dy:0,  sx:cx+ancho/2+4,  sy:cy-ancho/2-16},
+    {x:cx-ancho/2-L,  y:cy+ancho/4-7, dx:-1,dy:0,  sx:cx-ancho/2-16, sy:cy+ancho/2+4}
+  ];
+  for (let a=0;a<4;a++){
+    const p = pos[a], n = sim.colas[a].length;
+    g.fillStyle = '#f3f5f7';
+    for (let i=0;i<Math.min(n,MAXV);i++){
+      const vertical = p.dx===0;
+      const x = p.x + p.dx*i*(L+sep), y = p.y + p.dy*i*(L+sep);
+      g.fillRect(x,y, vertical?14:L, vertical?L:14);
+    }
+    g.fillStyle = '#1c232d'; g.font = '600 13px Figtree, sans-serif';
+    const tx = [cx-ancho/2-34, cx+ancho/2+8, W-60, 8][a];
+    const ty = [24, H-10, cy-ancho/2-8, cy+ancho/2+20][a];
+    g.fillText('cola '+n, tx, ty);
+    g.fillStyle = color(APROX[a]);
+    g.beginPath(); g.arc(p.sx+6,p.sy+6,7,0,7); g.fill();
+  }
+  $('dT').textContent = sim.t + ' s';
+  $('dFase').textContent = enRojo ? 'cambio' : (sim.fase===0 ? 'NS' : 'EO');
+  $('dEspera').textContent = coma(esperaMedia(sim)) + ' s';
+  $('dCola').textContent = sim.colaMax;
+}
+function bucle(ahora){
+  if (!corriendo) return;
+  acumulado += (ahora - ultimo)/1000 * (+$('vel').value);
+  ultimo = ahora;
+  while (acumulado >= 1 && sim.t < DURACION){ paso(sim); acumulado--; }
+  dibujar();
+  if (sim.t >= DURACION){ corriendo = false; $('bPlay').textContent = 'Iniciar'; return; }
+  requestAnimationFrame(bucle);
+}
+$('bPlay').onclick = ()=>{
+  if (sim.t >= DURACION) reiniciar();
+  corriendo = !corriendo;
+  $('bPlay').textContent = corriendo ? 'Pausar' : 'Iniciar';
+  if (corriendo){ ultimo = performance.now(); requestAnimationFrame(bucle); }
+};
+$('bReset').onclick = ()=>{ corriendo = false; $('bPlay').textContent = 'Iniciar'; reiniciar(); };
+['selEsc','selModo','vmin','vmax','kk','hor'].forEach(id=>
+  $(id).addEventListener('change',()=>{ corriendo = false; $('bPlay').textContent = 'Iniciar'; reiniciar(); }));
+
+// ---------- Comparación con 30 semillas ----------
+const media = v => v.reduce((a,b)=>a+b,0)/v.length;
+const desv = v => { const m = media(v); return Math.sqrt(media(v.map(x=>(x-m)**2))); };
+const espera = () => new Promise(r => setTimeout(r,0));
+
+async function comparar(){
+  const esc = $('selEsc').value, P = parametros();
+  const modos = ['base','reflejo','astar'], res = {};
+  $('bComp').disabled = true; corriendo = false; $('bPlay').textContent = 'Iniciar';
+  const barra = $('progreso').firstElementChild;
+  let hecho = 0;
+  for (const m of modos){
+    res[m] = { esp:[], cola:[], ms:[], nodos:0, planes:0 };
+    for (let semilla=1; semilla<=30; semilla++){
+      const s = crearSim(esc, semilla, m, P);
+      while (s.t < DURACION) paso(s);
+      res[m].esp.push(esperaMedia(s));
+      res[m].cola.push(s.colaMax);
+      res[m].ms.push(s.decisiones ? s.msDecision/s.decisiones : 0);
+      res[m].nodos += s.nodos; res[m].planes += s.planes;
+      barra.style.width = (++hecho/90*100) + '%';
+      await espera();
+    }
+  }
+  const base = media(res.base.esp);
+  const filas = modos.map(m=>{
+    const r = res[m], em = media(r.esp);
+    const gana = m==='base' ? '' : r.esp.filter((e,i)=> e < res.base.esp[i]).length + ' de 30';
+    const mejora = m==='base' ? '' : coma((base-em)/base*100) + ' %';
+    return {m, em, sd:desv(r.esp), cola:media(r.cola), ms:media(r.ms), mejora, gana};
+  });
+  const mejor = Math.min(...filas.map(f=>f.em));
+  $('cuerpo').innerHTML = filas.map(f=>
+    `<tr class="${f.em===mejor?'mejor':''}"><td>${NOMBRE[f.m]}</td><td>${coma(f.em)} ± ${coma(f.sd)}</td><td>${coma(f.cola)}</td><td>${f.ms.toFixed(3).replace('.',',')}</td><td>${f.mejora}</td><td>${f.gana}</td></tr>`
+  ).join('');
+  const prom = res.astar.planes ? res.astar.nodos/res.astar.planes : 0;
+  const total = 2**(Math.round(P.hor/5)+1) - 1;
+  $('notaNodos').textContent = `A* expande en promedio ${Math.round(prom)} nodos por plan. Una búsqueda en anchura sin heurística recorrería ${total} nodos con el mismo horizonte (${P.hor} s).`;
+  barra.style.width = '0'; $('bComp').disabled = false;
+}
+$('bComp').onclick = comparar;
+reiniciar();
+</script>
+</body>
+</html>
